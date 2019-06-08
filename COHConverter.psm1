@@ -205,7 +205,7 @@ function Import-COHCharacterProperty {
 }
 
 function Import-COHCharacter {
-    param([Parameter(Mandatory = $true)]$Character)
+    param([Parameter(Mandatory = $true)]$CharacterFilePath)
 
     return [CharacterData]::New($Character)
 
@@ -250,6 +250,40 @@ function Import-COHDefFile {
     }
     return $BadgeDefs
 }
+function Prune-COHCharacterData{
+param ($characterData)
+
+
+$CharacterData= Validate-COHBadgeStats -CharacterData $CharacterData -AttributeData $i24BadgeStatsAttributeData -remove 
+$CharacterData= Validate-COHBadgeFlags -CharacterData $CharacterData -defFile $i24BadgeDefData -remove 
+$characterData= Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'Powers' -Property 'PowerName' -remove
+$characterData= Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'PowerCustomizations' -Property 'PowerName' -remove
+$characterData= Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'RewardTokens' -Property 'PieceName' -remove
+$characterData= Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'Contacts' -Property 'id' -remove
+$characterData= Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'Tasks' -Property 'id' -remove
+
+
+return $characterData
+
+}
+
+function Validate-COHCharcterData{
+param($characterdata)
+
+try{
+Validate-COHBadgeStats -CharacterData $CharacterData -AttributeData $i24BadgeStatsAttributeData | ft
+Validate-COHBadgeFlags -CharacterData $CharacterData -defFile $i24BadgeDefData  | ft 
+Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'Powers' -Property 'PowerName' |ft 
+Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'PowerCustomizations' -Property 'PowerName'|ft
+Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'RewardTokens' -Property 'PieceName'|ft 
+Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'Contacts' -Property 'id' |Ft 
+Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'Tasks' -Property 'id' |ft 
+}
+catch{
+throw $_.Exception
+}
+
+}
 
 function Validate-COHAttributeProperty {
     param([Parameter(Mandatory = $true)]$CharacterData, $AttributeData, [Parameter(Mandatory = $true)]$Attribute, [Parameter(Mandatory = $true)]$Property, [switch]$remove)
@@ -282,12 +316,12 @@ function Validate-COHAttributeProperty {
     return  $MissingAttributes 
 }
 
+function Get-COHBadgeBitListFromHex {
+param($Hex)
 
-function Validate-COHBadgeFlags {
-    param([Parameter(Mandatory = $true)]$CharacterData, [Parameter(Mandatory = $true)]$DefFile, [switch]$remove)
-
-    $bitfield = Convert-HextoBitArray $CharacterData.badge
+ $bitfield = Convert-HextoBitArray $hex
     $I = 0
+    write-host "$($bitfield.where({$_ -eq 1}).count) badges found in character"
     $bitlist = [list[pscustomobject]]::new()
     foreach ($bit in $bitfield) {
         $bitlist.add([pscustomobject]@{
@@ -296,21 +330,45 @@ function Validate-COHBadgeFlags {
             })
         $I++
     }
-    [list[pscustomobject]]$badges = join-object -Left $bitlist -Right $DefFile -LeftJoinProperty id -RightJoinProperty index -Type AllInLeft -Prefix 'Def' | sort id
-    $MissingBadges = $badges.where( { $_.hasbadge -eq $true -and $_.defindex -eq $null }) 
+  return $bitlist
+
+}
+
+function Validate-COHBadgeFlags {
+    param([Parameter(Mandatory = $true)]$CharacterData, [Parameter(Mandatory = $true)]$DefFile, [switch]$remove)
+    $hex = $CharacterData.CharacterAttributes.where({($_.attribute -eq 'badges') -and ($_.property -eq 'owned')})[0].Value
+    #write-host $hex    
+    $bitlist = Get-COHBadgeBitListFromHex $hex
+    
+    $badges = [list[pscustomobject]]::new()
+
+    $badges = join-object -Left $bitlist -Right $DefFile -LeftJoinProperty id -RightJoinProperty index -Type AllInLeft -Prefix 'Def' | sort id
+    
+
+    $MissingBadges = $badges.where( { $_.hasbadge -eq $true -and $_.defindex -eq $null })
+    
+    write-host "$($MissingBadges.where({$_.hasbadge -eq 1}).count) missing badges"
+    
+     
     if (!$remove) {
-        return $MissingBadges
+      # return $badges
+       return $MissingBadges
     }
     
     if ($MissingBadges) {
 
         foreach ($missingBadge in $MissingBadges) {
-                write-host "Removing BadgeID $($missingBadge.ID)"
-                $badges.HasBadge[$missingBadge.ID] = $false
+                write-host "Setting BadgeID $($missingBadge.ID) $($missingbadge.hasbadge) to false"
+                $badges[$missingBadge.Id].HasBadge = $false 
+              
         }  
-        write-host "$($MissingBadges.count) Badges Removed" 
+        write-host "$($MissingBadges.count) Badges Removed"
+        $PostRemoveCount = $badges.where({$_.hasbadge -eq $true}).count
+        write-host "$($PostRemoveCount) in bit list" 
         $hex = Convert-BitArrayToHex $badges.HasBadge
+        
         $CharacterData.CharacterAttributes.where({($_.attribute -eq 'badges') -and ($_.property -eq 'owned')})[0].Value = $hex
+        write-host $CharacterData.CharacterAttributes.where({($_.attribute -eq 'badges') -and ($_.property -eq 'owned')})[0].Value
         return $CharacterData
     }
     else{
@@ -362,18 +420,17 @@ function Validate-COHBadgeStats {
 
 
 function Convert-HextoBitArray() {
-    param([Parameter(Mandatory = $true)]$hex)
+param([Parameter(Mandatory = $true)]$hex)
     
-    $ByteArray = [util.StringExtensions]::FromHexToByteArray($characterdata.badge)
+    $ByteArray = [util.StringExtensions]::FromHexToByteArray($hex)
     [int[]]$bitfield = [bitarray]::new($ByteArray)
     return $bitfield
 }
 
 
 function Convert-BitArrayToHex {
-    param([Parameter(Mandatory = $true)]$BitArray)
-    
-    [bitarray] $bitarray = [bitarray]::new($badges.hasbadge)
+param([Parameter(Mandatory = $true)]$BitArray)    
+    [bitarray] $bitarray = [bitarray]::new($BitArray)
     $ByteArray = [Util.StringExtensions]::BitArrayToByteArray($bitarray)
     $hex = [Util.StringExtensions]::ByteArrayToHexViaLookup32($ByteArray)
     return $hex 
