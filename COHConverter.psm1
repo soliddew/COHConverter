@@ -6,16 +6,6 @@ class CharacterData {
     CharacterData($Character) {
         $this.CharacterAttributes = Import-COHCharacterAttribute $Character
         $this.CharacterProperties = Import-COHCharacterProperty $Character
-     }
-}
-
-class Attribute {
-    [int] $ID
-    [string] $Name
-
-    Attribute([int]$ID, $Name) {
-        $this.ID = $ID
-        $this.Name = $name
     }
 }
 
@@ -32,6 +22,7 @@ class CharacterAttribute {
         $this.Attribute = $matches[1]
         $this.Property = $matches[3]
         $this.Value = $matches[4].replace('"', '')
+        #get badgestats in format OK for joining (int)
         if ($this.attribute -like 'badges*' -and $this.property -like 'c*') {
             $this.Property = $this.Property.replace('c', '')
             $this.property = $this.property -replace '^0+', '' 
@@ -39,17 +30,17 @@ class CharacterAttribute {
           
     }
  
-    [string] toString() { #I KNOW THIS MODIFIED THE DATA AND THATS BAD, HELP
-
-        if (($this.attribute -like 'badges*') -and ($this.property -ne 'owned') ) {
-            if(($this.property.Length -lt 3))
-            {
-              $this.property =  $this.property.padleft(3,'0')
+    [string] toString() {
+        #I KNOW THIS MODIFIED THE DATA AND THATS BAD, HELP. Please fucking fix this brett      
+        if (($this.attribute -like 'badges*') -and ($this.property -ne 'owned') -and !$this.property.contains('c') ) {  #handle badgestats format (pad 3)
+            if (($this.property.Length -lt 3)) {
+                $this.property = $this.property.padleft(3, '0')
             }
             $this.property = "c$($this.Property)"
             
         }
-        if ($this.value -match '[a-zA-Z]' -and (!$this.value.Contains('"'))) {
+        
+        if ($this.value -match '[a-zA-Z]' -and (!$this.value.Contains('"'))) {#requote strings
        
             $this.value = """$($this.value)"""
        
@@ -70,12 +61,14 @@ class CharacterProperty {
         $regex = '([^\s]*) (.+)'
         $propertyString -match $regex
         $this.Name = $matches[1]
-        $this.Value = $matches[2]
-    
+        $this.Value = $matches[2].replace('"', '')
     }
     [string] toString() {
-        if ($this.value -match '[a-zA-Z]') {
-            $this.value = "$($this.value)"
+     
+        if ($this.value -match '[a-zA-Z]' -and (!$this.value.Contains('"'))) {
+       
+            $this.value = """$($this.value)"""
+       
         }
         return "$($this.name) $($this.value)"
 
@@ -137,28 +130,6 @@ $convertbadge =
 
 Add-Type -TypeDefinition $Convertbadge -Language CSharp
 
-#not used because import-csv handles the files much faster
-function  Import-COHAttributeFile {
-    param([Parameter(Mandatory = $true)]$AttributeFilePath)
-    $ReturnList = new-object List[Attribute]
-    $ReturnList = [List[Attribute]]::New()
-    try {
-        write-host "Loading $($AttributeFilePath)"
-        $Attributes = import-csv  $AttributeFilePath -Delimiter " " -Header ID, Name
-       
-    }
-    catch {
-        throw "Couldn't load $($AttributeFilePath)"; return
-    }
-
-    foreach ($Attribute in $Attributes) {
-        $Attribute = [Attribute]::new($attribute.ID, $Attribute.Name)
-        $ReturnList.Add($Attribute) | out-null
-    }
-    return $ReturnList
-}
-
-
 
 function Import-COHCharacterAttribute {
     #accepts dbquery.exe dump, skips general properties (use ContainerAttribute)
@@ -167,8 +138,9 @@ function Import-COHCharacterAttribute {
     $returnList = new-object List[CharacterAttribute]
 
     foreach ($Attribute in $Container) {
-        #write-host $attribute
-        if (!$pastHeader) { #skip until we find [ character
+        
+        if (!$pastHeader) {
+            #skip until we find [ character
             if ($Attribute.Contains('[')) {
                 $PastHeader = $true
 
@@ -191,7 +163,7 @@ function Import-COHCharacterProperty {
     $ReturnList = new-object List[CharacterProperty]
 
     foreach ($property in $container) {
-        #write-host $property
+            
         if ($property.contains('[')) {
             break
         }
@@ -204,11 +176,11 @@ function Import-COHCharacterProperty {
 
 function Import-COHCharacter {
     param([Parameter(Mandatory = $true)]$CharacterFilePath)
-    try{
-    $character = get-content $CharacterFilePath
+    try {
+        $character = get-content $CharacterFilePath
     }
-    catch{
-    throw $_.exception
+    catch {
+        throw $_.exception
     }
     return [CharacterData]::New($Character)
 
@@ -219,8 +191,8 @@ function Export-COHCharacter {
 
     $out = new-object List[string]
 
-    $Auth = $CharacterData.CharacterProperties.where( { $_.property -eq 'AuthName' })
-    $Character = $CharacterData.CharacterProperties.where( { $_.property -eq 'Name' })
+    $Auth = $CharacterData.CharacterProperties.where( { $_.name -eq 'AuthName' })
+    $Character = $CharacterData.CharacterProperties.where( { $_.name -eq 'Name' })
 
     foreach ($property in $CharacterData.CharacterProperties) {
         $out.add($property.tostring())
@@ -230,7 +202,7 @@ function Export-COHCharacter {
     }
 
     $out | out-file -FilePath $path -Encoding ascii
-    write-host "Auth: $($auth) Character: $($character) written to $($path)"
+    write-host "Auth: $($auth.value) Character: $($character.value) written to $($path)"
     return 
 }
 
@@ -253,38 +225,38 @@ function Import-COHDefFile {
     }
     return $BadgeDefs
 }
-function Prune-COHCharacterData{
-param ($characterData)
+function Prune-COHCharacterData {
+    param ($characterData)
 
 
-$CharacterData= Validate-COHBadgeStats -CharacterData $CharacterData -AttributeData $i24BadgeStatsAttributeData -remove 
-$CharacterData= Validate-COHBadgeFlags -CharacterData $CharacterData -defFile $i24BadgeDefData -remove 
-$characterData= Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'Powers' -Property 'PowerName' -remove
-$characterData= Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'PowerCustomizations' -Property 'PowerName' -remove
-$characterData= Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'RewardTokens' -Property 'PieceName' -remove
-$characterData= Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'Contacts' -Property 'id' -remove
-$characterData= Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'Tasks' -Property 'id' -remove
+    $CharacterData = Validate-COHBadgeStats -CharacterData $CharacterData -AttributeData $i24BadgeStatsAttributeData -remove 
+    $CharacterData = Validate-COHBadgeFlags -CharacterData $CharacterData -defFile $i24BadgeDefData -remove 
+    $characterData = Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'Powers' -Property 'PowerName' -remove
+    $characterData = Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'PowerCustomizations' -Property 'PowerName' -remove
+    $characterData = Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'RewardTokens' -Property 'PieceName' -remove
+    $characterData = Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'Contacts' -Property 'id' -remove
+    $characterData = Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'Tasks' -Property 'id' -remove
 
 
-return $characterData
+    return $characterData
 
 }
 
-function Validate-COHCharcterData{
-param($characterdata)
+function Validate-COHCharcterData {
+    param($characterdata)
 
-try{
-Validate-COHBadgeStats -CharacterData $CharacterData -AttributeData $i24BadgeStatsAttributeData | ft
-Validate-COHBadgeFlags -CharacterData $CharacterData -defFile $i24BadgeDefData  | ft 
-Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'Powers' -Property 'PowerName' |ft 
-Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'PowerCustomizations' -Property 'PowerName'|ft
-Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'RewardTokens' -Property 'PieceName'|ft 
-Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'Contacts' -Property 'id' |Ft 
-Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'Tasks' -Property 'id' |ft 
-}
-catch{
-throw $_.Exception
-}
+    try {
+        Validate-COHBadgeStats -CharacterData $CharacterData -AttributeData $i24BadgeStatsAttributeData |ft
+        Validate-COHBadgeFlags -CharacterData $CharacterData -defFile $i24BadgeDefData | ft 
+        Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'Powers' -Property 'PowerName' | ft 
+        Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'PowerCustomizations' -Property 'PowerName' | ft
+        Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'RewardTokens' -Property 'PieceName' | ft 
+        Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'Contacts' -Property 'id' | Ft 
+        Validate-COHAttributeProperty -CharacterData $characterdata -AttributeData $i24VarAttributeData -Attribute 'Tasks' -Property 'id' | ft 
+    }
+    catch {
+        throw $_.Exception
+    }
 
 }
 
@@ -311,18 +283,19 @@ function Validate-COHAttributeProperty {
             
     }
     else {
-        if($remove){
-        write-host "No items found to remove for $($Attribute) $($Property)"
-        return $CharacterData}
+        if ($remove) {
+            write-host "No items found to remove for $($Attribute) $($Property)"
+            return $CharacterData
+        }
     }
     write-host "$($missingattributes.count) Missing Attributes for Attributes $($Attribute) $($Property)"
     return  $MissingAttributes 
 }
 
 function Get-COHBadgeBitListFromHex {
-param($Hex)
+    param($Hex)
 
- $bitfield = Convert-HextoBitArray $hex
+    $bitfield = Convert-HextoBitArray $hex
     $I = 0
     write-host "$($bitfield.where({$_ -eq 1}).count) badges found in character"
     $bitlist = [list[pscustomobject]]::new()
@@ -333,48 +306,41 @@ param($Hex)
             })
         $I++
     }
-  return $bitlist
+    return $bitlist
 
 }
 
+
 function Validate-COHBadgeFlags {
     param([Parameter(Mandatory = $true)]$CharacterData, [Parameter(Mandatory = $true)]$DefFile, [switch]$remove)
-    $hex = $CharacterData.CharacterAttributes.where({($_.attribute -eq 'badges') -and ($_.property -eq 'owned')})[0].Value
+    $hex = $CharacterData.CharacterAttributes.where( { ($_.attribute -eq 'badges') -and ($_.property -eq 'owned') })[0].Value
     #write-host $hex    
-    $bitlist = Get-COHBadgeBitListFromHex $hex
-    
+    $bitlist = Get-COHBadgeBitListFromHex $hex    
     $badges = [list[pscustomobject]]::new()
-
-    $badges = join-object -Left $bitlist -Right $DefFile -LeftJoinProperty id -RightJoinProperty index -Type AllInLeft -Prefix 'Def' | sort id
-    
-
-    $MissingBadges = $badges.where( { $_.hasbadge -eq $true -and $_.defindex -eq $null })
-    
-    write-host "$($MissingBadges.where({$_.hasbadge -eq 1}).count) missing badges"
-    
+    $badges = join-object -Left $bitlist -Right $DefFile -LeftJoinProperty id -RightJoinProperty index -Type AllInLeft -Prefix 'Def' | sort id  
+    $MissingBadges = $badges.where( { $_.hasbadge -eq $true -and $_.defindex -eq $null })   
+    write-host "$($MissingBadges.where({$_.hasbadge -eq 1}).count) missing badges"   
      
     if (!$remove) {
-      # return $badges
-       return $MissingBadges
+        return $badges
+      
     }
     
     if ($MissingBadges) {
 
         foreach ($missingBadge in $MissingBadges) {
-                write-host "Setting BadgeID $($missingBadge.ID) $($missingbadge.hasbadge) to false"
-                $badges[$missingBadge.Id].HasBadge = $false 
+            write-host "Setting BadgeID $($missingBadge.ID) $($missingbadge.hasbadge) to false"
+            $badges[$missingBadge.Id].HasBadge = $false 
               
         }  
         write-host "$($MissingBadges.count) Badges Removed"
-        $PostRemoveCount = $badges.where({$_.hasbadge -eq $true}).count
+        $PostRemoveCount = $badges.where( { $_.hasbadge -eq $true }).count
         write-host "$($PostRemoveCount) in bit list" 
-        $hex = Convert-BitArrayToHex $badges.HasBadge
-        
-        $CharacterData.CharacterAttributes.where({($_.attribute -eq 'badges') -and ($_.property -eq 'owned')})[0].Value = $hex
-        write-host $CharacterData.CharacterAttributes.where({($_.attribute -eq 'badges') -and ($_.property -eq 'owned')})[0].Value
+        $hex = Convert-BitArrayToHex $badges.HasBadge      
+        $CharacterData.CharacterAttributes.where( { ($_.attribute -eq 'badges') -and ($_.property -eq 'owned') })[0].Value = $hex
         return $CharacterData
     }
-    else{
+    else {
         write-host "No Missing Badges" 
         return $CharacterData
     }
@@ -396,34 +362,32 @@ function Validate-COHBadgeStats {
     }
 
     [list[pscustomobject]]$ret = join-object -Left $BadgeStats -Right $AttributeData -leftjoinproperty property -RightJoinProperty id -RightProperties id, name  -Prefix 'AttFile_'
-
     [list[pscustomobject]]$MissingAttributes = $ret.where( { $_.AttFile_id -eq $null })
 
     if ($remove -and $MissingAttributes) {
 
-      write-host "Removing $($MissingAttributes.count) badge stats"
-      foreach ($MissingAttribute in $MissingAttributes) {
+        write-host "Removing $($MissingAttributes.count) badge stats"
+        foreach ($MissingAttribute in $MissingAttributes) {
             write-host "Removing badge stat : $($MissingAttribute.Attribute) $($MissingAttribute.Property)"
-           $Removed =  $CharacterData.CharacterAttributes.RemoveAll( { param($m) ($m.Attribute.equals($MissingAttribute.Attribute) -and $m.Property.equals($MissingAttribute.Property)) }) | out-null
-           $removedTotal = $removed + $removedTotal
-      }
+            $Removed = $CharacterData.CharacterAttributes.RemoveAll( { param($m) ($m.Attribute.equals($MissingAttribute.Attribute) -and $m.Property.equals($MissingAttribute.Property)) }) | out-null
+            $removedTotal = $removed + $removedTotal
+        }
         return $CharacterData
     }
     else {
-        if($remove)
-        {
-        write-host "No badge stats found to remove"
-        return $CharacterData
+        if ($remove) {
+            write-host "No badge stats found to remove"
+            return $CharacterData
         }        
     }
-    #write-host " Badge Stats Removed"
+    write-host "$($missingattributes.count) missing badge stats"
     return $MissingAttributes 
 }
 
 
 
 function Convert-HextoBitArray() {
-param([Parameter(Mandatory = $true)]$hex)
+    param([Parameter(Mandatory = $true)]$hex)
     
     $ByteArray = [util.StringExtensions]::FromHexToByteArray($hex)
     [int[]]$bitfield = [bitarray]::new($ByteArray)
@@ -432,7 +396,7 @@ param([Parameter(Mandatory = $true)]$hex)
 
 
 function Convert-BitArrayToHex {
-param([Parameter(Mandatory = $true)]$BitArray)    
+    param([Parameter(Mandatory = $true)]$BitArray)    
     [bitarray] $bitarray = [bitarray]::new($BitArray)
     $ByteArray = [Util.StringExtensions]::BitArrayToByteArray($bitarray)
     $hex = [Util.StringExtensions]::ByteArrayToHexViaLookup32($ByteArray)
@@ -440,10 +404,10 @@ param([Parameter(Mandatory = $true)]$BitArray)
 }
 
 
-function Import-CharacterFileDB{
-param([Parameter(Mandatory = $true)]$CharacterFilePath,[Parameter(Mandatory = $true)]$DBQueryPath)
-push-location c:\cohsource\bin
-.\dbquery.exe -putcharacter $CharacterFilePath
+function Import-CharacterFileDB {
+    param([Parameter(Mandatory = $true)]$CharacterFilePath, [Parameter(Mandatory = $true)]$DBQueryPath)
+    push-location c:\cohsource\bin
+    .\dbquery.exe -putcharacter $CharacterFilePath
 }
 
 function Join-Object {
