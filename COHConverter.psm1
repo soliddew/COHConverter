@@ -3,12 +3,10 @@ using namespace System.Collections
 class CharacterData {
     [list[CharacterAttribute]] $CharacterAttributes
     [list[CharacterProperty]] $CharacterProperties
-    $badge
     CharacterData($Character) {
         $this.CharacterAttributes = Import-COHCharacterAttribute $Character
         $this.CharacterProperties = Import-COHCharacterProperty $Character
-        [String] $this.badge = $this.CharacterAttributes.Where( { $_.Property -eq 'Owned' -and $_.Attribute -eq 'Badges' }).Value.Replace('"', '')
-    }
+     }
 }
 
 class Attribute {
@@ -206,7 +204,12 @@ function Import-COHCharacterProperty {
 
 function Import-COHCharacter {
     param([Parameter(Mandatory = $true)]$CharacterFilePath)
-
+    try{
+    $character = get-content $CharacterFilePath
+    }
+    catch{
+    throw $_.exception
+    }
     return [CharacterData]::New($Character)
 
 }
